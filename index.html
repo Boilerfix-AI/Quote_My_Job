@@ -837,12 +837,14 @@
 
 </div><!-- .container -->
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   // ============================================================
-  // CONFIG — Replace with your actual Supabase credentials
+  // CONFIG
   // ============================================================
   const SUPABASE_URL = 'https://tmemifugidjhhjghprex.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtZW1pZnVnaWRqaGhqZ2hwcmV4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4MzI0ODMsImV4cCI6MjA4NzQwODQ4M30.oFliwoHMS967phYNnWZnMDgSF4KQ5a7TPgRLnzoQ6wE';
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   // ============================================================
   // STATE
@@ -878,7 +880,6 @@
   function addFiles(files) {
     const photoError = document.getElementById('photoError');
     photoError.classList.remove('show');
-
     for (const file of files) {
       if (selectedFiles.length >= 5) break;
       if (file.size > 5 * 1024 * 1024) {
@@ -897,10 +898,7 @@
       const url = URL.createObjectURL(file);
       const div = document.createElement('div');
       div.className = 'photo-preview';
-      div.innerHTML = `
-        <img src="${url}" alt="Photo ${i+1}">
-        <button class="photo-remove" onclick="removePhoto(${i})">×</button>
-      `;
+      div.innerHTML = `<img src="${url}" alt="Photo ${i+1}"><button class="photo-remove" onclick="removePhoto(${i})">×</button>`;
       container.appendChild(div);
     });
   }
@@ -956,15 +954,12 @@
     document.getElementById(`step${currentStep}`).classList.remove('active');
     document.getElementById(`stepInd${currentStep}`).classList.remove('active');
     document.getElementById(`stepInd${currentStep}`).classList.add('done');
-
     currentStep = n;
     document.getElementById(`step${currentStep}`).classList.add('active');
     document.getElementById(`stepInd${currentStep}`).classList.remove('done');
     document.getElementById(`stepInd${currentStep}`).classList.add('active');
-
     const fills = { 1: '33%', 2: '66%', 3: '100%' };
     document.getElementById('progressFill').style.width = fills[n];
-
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -972,10 +967,8 @@
     const postcode = document.getElementById('postcode').value;
     const description = document.getElementById('description').value.trim();
     let valid = true;
-
     valid = setError('postcode', 'postcodeError', !validatePostcode(postcode)) && valid;
     valid = setError('description', 'descriptionError', description.length < 20) && valid;
-
     if (valid) goToStep(2);
   }
 
@@ -984,13 +977,10 @@
     const phone = document.getElementById('customerPhone').value.trim();
     const email = document.getElementById('customerEmail').value.trim();
     let valid = true;
-
     valid = setError('customerName', 'nameError', name.length < 2) && valid;
     valid = setError('customerPhone', 'phoneError', !validatePhone(phone)) && valid;
     valid = setError('customerEmail', 'emailError', !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) && valid;
-
     if (valid) {
-      // Populate summary
       document.getElementById('sumPostcode').textContent = document.getElementById('postcode').value.toUpperCase();
       document.getElementById('sumDescription').textContent = document.getElementById('description').value.trim();
       document.getElementById('sumPhotos').textContent = selectedFiles.length > 0 ? `${selectedFiles.length} photo${selectedFiles.length > 1 ? 's' : ''} added` : 'None added';
@@ -1002,45 +992,36 @@
   }
 
   // ============================================================
-  // POSTCODE → LAT/LNG via postcodes.io (free, no key needed)
+  // POSTCODE → LAT/LNG
   // ============================================================
   async function getLatLng(postcode) {
     try {
       const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(postcode)}`);
       const data = await res.json();
-      if (data.status === 200) {
-        return { lat: data.result.latitude, lng: data.result.longitude };
-      }
+      if (data.status === 200) return { lat: data.result.latitude, lng: data.result.longitude };
     } catch (e) {}
     return { lat: null, lng: null };
   }
 
   // ============================================================
-  // UPLOAD PHOTOS TO SUPABASE STORAGE
+  // UPLOAD PHOTOS
   // ============================================================
   async function uploadPhotos(jobId) {
     const urls = [];
     for (const file of selectedFiles) {
       const ext = file.name.split('.').pop();
       const path = `${jobId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/job-photos/${path}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': file.type,
-          'x-upsert': 'false'
-        },
-        body: file
-      });
-      if (res.ok) {
-        urls.push(`${SUPABASE_URL}/storage/v1/object/public/job-photos/${path}`);
+      const { data, error } = await supabase.storage.from('job-photos').upload(path, file);
+      if (!error) {
+        const { data: { publicUrl } } = supabase.storage.from('job-photos').getPublicUrl(path);
+        urls.push(publicUrl);
       }
     }
     return urls;
   }
 
   // ============================================================
-  // SUBMIT JOB
+  // SUBMIT JOB — using Supabase JS client
   // ============================================================
   async function submitJob() {
     const btn = document.getElementById('submitBtn');
@@ -1054,20 +1035,13 @@
       const phone = document.getElementById('customerPhone').value.trim();
       const email = document.getElementById('customerEmail').value.trim();
 
-      // 1. Get lat/lng from postcode
+      // 1. Get lat/lng
       const { lat, lng } = await getLatLng(postcode);
 
-      // 2. Insert job into Supabase (reference auto-generated by trigger)
-      const jobRes = await fetch(`${SUPABASE_URL}/rest/v1/jobs`, {
-        method: 'POST',
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify({
-          reference: '',
+      // 2. Insert job — do NOT send reference, let trigger generate it
+      const { data, error } = await supabase
+        .from('jobs')
+        .insert({
           customer_name: name,
           customer_email: email,
           customer_phone: phone,
@@ -1078,36 +1052,30 @@
           photo_urls: [],
           status: 'open'
         })
-      });
+        .select()
+        .single();
 
-      if (!jobRes.ok) throw new Error('Failed to submit job');
+      if (error) {
+        console.error('Supabase error:', error);
+        throw new Error(error.message);
+      }
 
-      const [job] = await jobRes.json();
-
-      // 3. Upload photos if any, then update job with URLs
+      // 3. Upload photos if any
       if (selectedFiles.length > 0) {
-        const photoUrls = await uploadPhotos(job.id);
+        const photoUrls = await uploadPhotos(data.id);
         if (photoUrls.length > 0) {
-          await fetch(`${SUPABASE_URL}/rest/v1/jobs?id=eq.${job.id}`, {
-            method: 'PATCH',
-            headers: {
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ photo_urls: photoUrls })
-          });
+          await supabase.from('jobs').update({ photo_urls: photoUrls }).eq('id', data.id);
         }
       }
 
       // 4. Show success
-      showSuccess(job.reference);
+      showSuccess(data.reference);
 
     } catch (err) {
       console.error(err);
       btn.classList.remove('loading');
       btn.disabled = false;
-      alert('Something went wrong. Please try again or call us directly.');
+      alert('Something went wrong: ' + err.message);
     }
   }
 
